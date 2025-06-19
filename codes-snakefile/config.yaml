@@ -1,0 +1,5 @@
+# Directory containing input FASTA files
+input_dir: data/raw
+
+# Reference genome FASTA file
+reference: reference/genome.fasta
