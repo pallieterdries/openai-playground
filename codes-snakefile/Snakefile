@@ -1,0 +1,94 @@
+import os
+from glob import glob
+
+configfile: "config.yaml"
+
+# Get sample names from input directory
+SAMPLES = [os.path.splitext(os.path.basename(f))[0] for f in glob(os.path.join(config["input_dir"], "*.fasta"))]
+
+rule all:
+    input:
+        expand("040.vcf/{sample}.vcf", sample=SAMPLES),
+        "999.reports/multiqc_report.html"
+
+rule copy_fasta:
+    input:
+        lambda wildcards: os.path.join(config["input_dir"], f"{wildcards.sample}.fasta")
+    output:
+        "000.fasta/{sample}.fasta"
+    shell:
+        "cp {input} {output}"
+
+rule fastqc:
+    input:
+        "000.fasta/{sample}.fasta"
+    output:
+        html="010.fastqc/{sample}_fastqc.html",
+        zip="010.fastqc/{sample}_fastqc.zip"
+    conda:
+        "envs/fastqc.yaml"
+    shell:
+        "fastqc {input} --outdir 010.fastqc"
+
+rule align:
+    input:
+        fasta="000.fasta/{sample}.fasta",
+        ref=config["reference"]
+    output:
+        "020.align/{sample}.sam"
+    conda:
+        "envs/bwa.yaml"
+    shell:
+        "bwa mem {input.ref} {input.fasta} > {output}"
+
+rule sort_bam:
+    input:
+        "020.align/{sample}.sam"
+    output:
+        bam="030.bam/{sample}.sorted.bam"
+    conda:
+        "envs/samtools.yaml"
+    shell:
+        "samtools sort -o {output.bam} {input}"
+
+rule index_bam:
+    input:
+        bam="030.bam/{sample}.sorted.bam"
+    output:
+        bai="030.bam/{sample}.sorted.bam.bai"
+    conda:
+        "envs/samtools.yaml"
+    shell:
+        "samtools index {input.bam}"
+
+rule call_variants:
+    input:
+        bam="030.bam/{sample}.sorted.bam",
+        bai="030.bam/{sample}.sorted.bam.bai",
+        ref=config["reference"]
+    output:
+        "040.vcf/{sample}.vcf"
+    conda:
+        "envs/bcftools.yaml"
+    shell:
+        "bcftools mpileup -f {input.ref} {input.bam} | bcftools call -mv -Oz -o {output}"
+
+rule index_vcf:
+    input:
+        "040.vcf/{sample}.vcf"
+    output:
+        "040.vcf/{sample}.vcf.tbi"
+    conda:
+        "envs/bcftools.yaml"
+    shell:
+        "bcftools index {input}"
+
+rule multiqc:
+    input:
+        expand("010.fastqc/{sample}_fastqc.zip", sample=SAMPLES)
+    output:
+        "999.reports/multiqc_report.html"
+    conda:
+        "envs/multiqc.yaml"
+    shell:
+        "multiqc . -o 999.reports"
